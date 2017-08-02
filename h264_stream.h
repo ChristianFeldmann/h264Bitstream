@@ -361,6 +361,8 @@ typedef struct
     pps_t* pps_table[256];
     sei_t** seis;
 
+    int CpbDpbDelaysPresentFlag;
+
 } h264_stream_t;
 
 h264_stream_t* h264_new();

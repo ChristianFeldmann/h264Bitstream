@@ -35,9 +35,48 @@ extern "C" {
 
 typedef struct
 {
+    int seq_parameter_set_id;
+    int nal_parameters_read;
+    int nal_initial_cpb_removal_delay[32];
+    int nal_initial_cpb_removal_delay_offset[32];
+    int vcl_parameters_read;
+    int vcl_initial_cpb_removal_delay[32];
+    int vcl_initial_cpb_removal_delay_offset[32];
+} sei_data_buffering_period;
+
+typedef struct
+{
+  int cpb_removal_delay;
+  int dpb_output_delay;
+
+  int pic_struct;
+  int clock_timestamp_flag[3];
+  int ct_type[3];
+  int nuit_field_based_flag[3];
+  int counting_type[3];
+  int full_timestamp_flag[3];
+  int discontinuity_flag[3];
+  int cnt_dropped_flag[3];
+  int n_frames[3];
+
+  int NumClockTS;
+  int seconds_value[3];
+  int minutes_value[3];
+  int hours_value[3];
+  int seconds_flag[3];
+  int minutes_flag[3];
+  int hours_flag[3];
+  int time_offset[3];
+
+} sei_data_pic_timing;
+
+typedef struct
+{
     int payloadType;
     int payloadSize;
     uint8_t* payload;
+
+    void *payload_data;
 } sei_t;
 
 sei_t* sei_new();

@@ -80,6 +80,7 @@ h264_stream_t* h264_new()
     h->seis = NULL;
     h->sei = NULL;  //This is a TEMP pointer at whats in h->seis...
     h->sh = (slice_header_t*)calloc(1, sizeof(slice_header_t));
+    h->CpbDpbDelaysPresentFlag = 0;
 
     return h;   
 }
@@ -610,11 +611,13 @@ void read_vui_parameters(h264_stream_t* h, bs_t* b)
     sps->vui.nal_hrd_parameters_present_flag = bs_read_u1(b);
     if( sps->vui.nal_hrd_parameters_present_flag )
     {
+        h->CpbDpbDelaysPresentFlag = 1;
         read_hrd_parameters(h, b);
     }
     sps->vui.vcl_hrd_parameters_present_flag = bs_read_u1(b);
     if( sps->vui.vcl_hrd_parameters_present_flag )
     {
+        h->CpbDpbDelaysPresentFlag = 1;
         read_hrd_parameters(h, b);
     }
     if( sps->vui.nal_hrd_parameters_present_flag || sps->vui.vcl_hrd_parameters_present_flag )
@@ -2356,38 +2359,116 @@ void debug_seis( h264_stream_t* h)
     for (i = 0; i < num_seis; i++)
     {
         sei_t* s = seis[i];
-        switch(s->payloadType)
-        {
-        case SEI_TYPE_BUFFERING_PERIOD :          sei_type_name = "Buffering period"; break;
-        case SEI_TYPE_PIC_TIMING :                sei_type_name = "Pic timing"; break;
-        case SEI_TYPE_PAN_SCAN_RECT :             sei_type_name = "Pan scan rect"; break;
-        case SEI_TYPE_FILLER_PAYLOAD :            sei_type_name = "Filler payload"; break;
-        case SEI_TYPE_USER_DATA_REGISTERED_ITU_T_T35 : sei_type_name = "User data registered ITU-T T35"; break;
-        case SEI_TYPE_USER_DATA_UNREGISTERED :    sei_type_name = "User data unregistered"; break;
-        case SEI_TYPE_RECOVERY_POINT :            sei_type_name = "Recovery point"; break;
-        case SEI_TYPE_DEC_REF_PIC_MARKING_REPETITION : sei_type_name = "Dec ref pic marking repetition"; break;
-        case SEI_TYPE_SPARE_PIC :                 sei_type_name = "Spare pic"; break;
-        case SEI_TYPE_SCENE_INFO :                sei_type_name = "Scene info"; break;
-        case SEI_TYPE_SUB_SEQ_INFO :              sei_type_name = "Sub seq info"; break;
-        case SEI_TYPE_SUB_SEQ_LAYER_CHARACTERISTICS : sei_type_name = "Sub seq layer characteristics"; break;
-        case SEI_TYPE_SUB_SEQ_CHARACTERISTICS :   sei_type_name = "Sub seq characteristics"; break;
-        case SEI_TYPE_FULL_FRAME_FREEZE :         sei_type_name = "Full frame freeze"; break;
-        case SEI_TYPE_FULL_FRAME_FREEZE_RELEASE : sei_type_name = "Full frame freeze release"; break;
-        case SEI_TYPE_FULL_FRAME_SNAPSHOT :       sei_type_name = "Full frame snapshot"; break;
-        case SEI_TYPE_PROGRESSIVE_REFINEMENT_SEGMENT_START : sei_type_name = "Progressive refinement segment start"; break;
-        case SEI_TYPE_PROGRESSIVE_REFINEMENT_SEGMENT_END : sei_type_name = "Progressive refinement segment end"; break;
-        case SEI_TYPE_MOTION_CONSTRAINED_SLICE_GROUP_SET : sei_type_name = "Motion constrained slice group set"; break;
-        case SEI_TYPE_FILM_GRAIN_CHARACTERISTICS : sei_type_name = "Film grain characteristics"; break;
-        case SEI_TYPE_DEBLOCKING_FILTER_DISPLAY_PREFERENCE : sei_type_name = "Deblocking filter display preference"; break;
-        case SEI_TYPE_STEREO_VIDEO_INFO :         sei_type_name = "Stereo video info"; break;
-        default: sei_type_name = "Unknown"; break;
-        }
-        printf("=== %s ===\n", sei_type_name);
-        printf(" payloadType : %d \n", s->payloadType );
-        printf(" payloadSize : %d \n", s->payloadSize );
 
-        printf(" payload : " );
-        debug_bytes(s->payload, s->payloadSize);
+        if (s->payloadType == SEI_TYPE_BUFFERING_PERIOD)
+        {
+          sei_data_buffering_period *buff = (sei_data_buffering_period*)s->payload_data;
+          printf(" payloadType : buffering_period\n");
+          printf(" seq_parameter_set_id : %d \n", buff->seq_parameter_set_id );
+          for (int i=0; i<buff->nal_parameters_read; i++)
+          {
+            printf(" nal_initial_cpb_removal_delay[SchedSelIdx] : %d \n", buff->nal_initial_cpb_removal_delay[i] );
+            printf(" nal_initial_cpb_removal_delay_offset[SchedSelIdx] : %d \n", buff->nal_initial_cpb_removal_delay_offset[i] );
+          }
+          for (int i=0; i<buff->vcl_parameters_read; i++)
+          {
+            printf(" vcl_initial_cpb_removal_delay[SchedSelIdx] : %d \n", buff->vcl_initial_cpb_removal_delay[i] );
+            printf(" vcl_initial_cpb_removal_delay_offset[SchedSelIdx] : %d \n", buff->vcl_initial_cpb_removal_delay_offset[i] );
+          }
+        }
+        else if (s->payloadType == SEI_TYPE_PIC_TIMING)
+        {
+          sei_data_pic_timing *timing = (sei_data_pic_timing*)s->payload_data;
+          printf(" payloadType : sei_data_pic_timing\n");
+          if (h->CpbDpbDelaysPresentFlag != 0)
+          {
+            printf(" cpb_removal_delay : %d \n", timing->cpb_removal_delay );
+            printf(" dpb_output_delay : %d \n", timing->dpb_output_delay );
+          }
+          if (h->sps->vui.pic_struct_present_flag)
+          {
+            printf(" pic_struct : %d \n", timing->pic_struct );
+            printf(" NumClockTS : %d \n", timing->NumClockTS );
+            for( int i = 0; i < timing->NumClockTS ; i++ )
+            {
+              printf(" clock_timestamp_flag : %d \n", timing->clock_timestamp_flag[i] );
+              if (timing->clock_timestamp_flag[i])
+              {
+                printf(" ct_type : %d \n", timing->ct_type[i] );
+                printf(" nuit_field_based_flag : %d \n", timing->nuit_field_based_flag[i] );
+                printf(" counting_type : %d \n", timing->counting_type[i] );
+                printf(" full_timestamp_flag : %d \n", timing->full_timestamp_flag[i] );
+                printf(" discontinuity_flag : %d \n", timing->discontinuity_flag[i] );
+                printf(" cnt_dropped_flag : %d \n", timing->cnt_dropped_flag[i] );
+                printf(" n_frames : %d \n", timing->n_frames[i] );
+                if( timing->full_timestamp_flag[i] != 0 ) 
+                {
+                  printf(" seconds_value : %d \n", timing->seconds_value[i] );
+                  printf(" minutes_value : %d \n", timing->minutes_value[i] );
+                  printf(" hours_value : %d \n", timing->hours_value[i] );
+                }
+                else
+                {
+                  printf(" seconds_flag : %d \n", timing->seconds_flag[i] );
+                  if (timing->seconds_flag[i] != 0)
+                  {
+                    printf(" seconds_value : %d \n", timing->seconds_value[i] );
+                    printf(" minutes_flag : %d \n", timing->minutes_flag[i] );
+                    if ( timing->minutes_flag[i] != 0 )
+                    {
+                      printf(" minutes_value : %d \n", timing->minutes_value[i] );
+                      printf(" hours_flag : %d \n", timing->hours_flag[i] );
+                      if (timing->hours_flag[i])
+                      {
+                        printf(" hours_value : %d \n", timing->hours_value[i] );
+                      }
+                    }
+                  }
+                }
+                if( h->sps->hrd.time_offset_length > 0 )
+                {
+                  printf(" time_offset : %d \n", timing->time_offset[i] );
+                }
+              }
+            }
+          }
+        }
+        else
+        {
+          // Just display the type and the raw bytes
+          switch(s->payloadType)
+          {
+        
+          case SEI_TYPE_PIC_TIMING :                sei_type_name = "Pic timing"; break;
+          case SEI_TYPE_PAN_SCAN_RECT :             sei_type_name = "Pan scan rect"; break;
+          case SEI_TYPE_FILLER_PAYLOAD :            sei_type_name = "Filler payload"; break;
+          case SEI_TYPE_USER_DATA_REGISTERED_ITU_T_T35 : sei_type_name = "User data registered ITU-T T35"; break;
+          case SEI_TYPE_USER_DATA_UNREGISTERED :    sei_type_name = "User data unregistered"; break;
+          case SEI_TYPE_RECOVERY_POINT :            sei_type_name = "Recovery point"; break;
+          case SEI_TYPE_DEC_REF_PIC_MARKING_REPETITION : sei_type_name = "Dec ref pic marking repetition"; break;
+          case SEI_TYPE_SPARE_PIC :                 sei_type_name = "Spare pic"; break;
+          case SEI_TYPE_SCENE_INFO :                sei_type_name = "Scene info"; break;
+          case SEI_TYPE_SUB_SEQ_INFO :              sei_type_name = "Sub seq info"; break;
+          case SEI_TYPE_SUB_SEQ_LAYER_CHARACTERISTICS : sei_type_name = "Sub seq layer characteristics"; break;
+          case SEI_TYPE_SUB_SEQ_CHARACTERISTICS :   sei_type_name = "Sub seq characteristics"; break;
+          case SEI_TYPE_FULL_FRAME_FREEZE :         sei_type_name = "Full frame freeze"; break;
+          case SEI_TYPE_FULL_FRAME_FREEZE_RELEASE : sei_type_name = "Full frame freeze release"; break;
+          case SEI_TYPE_FULL_FRAME_SNAPSHOT :       sei_type_name = "Full frame snapshot"; break;
+          case SEI_TYPE_PROGRESSIVE_REFINEMENT_SEGMENT_START : sei_type_name = "Progressive refinement segment start"; break;
+          case SEI_TYPE_PROGRESSIVE_REFINEMENT_SEGMENT_END : sei_type_name = "Progressive refinement segment end"; break;
+          case SEI_TYPE_MOTION_CONSTRAINED_SLICE_GROUP_SET : sei_type_name = "Motion constrained slice group set"; break;
+          case SEI_TYPE_FILM_GRAIN_CHARACTERISTICS : sei_type_name = "Film grain characteristics"; break;
+          case SEI_TYPE_DEBLOCKING_FILTER_DISPLAY_PREFERENCE : sei_type_name = "Deblocking filter display preference"; break;
+          case SEI_TYPE_STEREO_VIDEO_INFO :         sei_type_name = "Stereo video info"; break;
+          default: sei_type_name = "Unknown"; break;
+          }
+          printf("=== %s ===\n", sei_type_name);
+          printf(" payloadType : %d \n", s->payloadType );
+          printf(" payloadSize : %d \n", s->payloadSize );
+
+          printf(" payload : " );
+          debug_bytes(s->payload, s->payloadSize);
+        }
     }
 }
 
