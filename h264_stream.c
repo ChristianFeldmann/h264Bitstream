@@ -2517,6 +2517,36 @@ void debug_nal(h264_stream_t* h, nal_t* nal)
     else if( nal->nal_unit_type == NAL_UNIT_TYPE_SEI) { debug_seis( h ); }
 }
 
+void debug_slice_size(h264_stream_t* h, nal_t* nal)
+{
+  if (nal->nal_unit_type != NAL_UNIT_TYPE_CODED_SLICE_IDR &&
+      nal->nal_unit_type != NAL_UNIT_TYPE_CODED_SLICE_NON_IDR)
+    return;
+
+  slice_header_t* sh = h->sh;
+
+  const char* slice_type_name;
+  switch (sh->slice_type)
+  {
+  case SH_SLICE_TYPE_P:       slice_type_name = "P slice"; break;
+  case SH_SLICE_TYPE_B:       slice_type_name = "B slice"; break;
+  case SH_SLICE_TYPE_I:       slice_type_name = "I slice"; break;
+  case SH_SLICE_TYPE_SP:      slice_type_name = "SP slice"; break;
+  case SH_SLICE_TYPE_SI:      slice_type_name = "SI slice"; break;
+  case SH_SLICE_TYPE_P_ONLY:  slice_type_name = "P slice only"; break;
+  case SH_SLICE_TYPE_B_ONLY:  slice_type_name = "B slice only"; break;
+  case SH_SLICE_TYPE_I_ONLY:  slice_type_name = "I slice only"; break;
+  case SH_SLICE_TYPE_SP_ONLY: slice_type_name = "SP slice only"; break;
+  case SH_SLICE_TYPE_SI_ONLY: slice_type_name = "SI slice only"; break;
+  default:                    slice_type_name = "Unknown"; break;
+  }
+
+  int poc = sh->pic_order_cnt_lsb;
+  int size = nal->sizeof_parsed;
+
+  printf("POC %d size %d type %s\n", poc, size, slice_type_name);
+}
+
 void debug_bytes(uint8_t* buf, int len)
 {
     int i;

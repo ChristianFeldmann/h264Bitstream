@@ -72,6 +72,7 @@ int main(int argc, char *argv[])
 
     int opt_verbose = 1;
     int opt_probe = 0;
+    int print_poc_sizes = 0;
 
 #ifdef HAVE_GETOPT_LONG
     int c;
@@ -105,6 +106,12 @@ int main(int argc, char *argv[])
 #else
 
     infile = fopen(argv[1], "rb");
+    char nalSizeString[] = "-nalSize\0";
+    if (argc == 3 && strcmp(argv[2], &nalSizeString) == 0)
+    {
+      print_poc_sizes = 1;
+      opt_verbose = 0;
+    }
 
 #endif
 
@@ -117,6 +124,15 @@ int main(int argc, char *argv[])
     size_t sz = 0;
     int64_t off = 0;
     uint8_t* p = buf;
+
+    int last_poc = -1;
+    int last_idr_abs_poc = 0;
+    int last_gop_highest_poc = 0;
+    int last_poc_size = 0;
+    int prevPicOrderCntLsb = 0;
+    int prevPicOrderCntMsb = 0;
+    int lastPicIDR = 0;
+    int frame_count = 0;
 
     int nal_start, nal_end;
 
@@ -131,8 +147,11 @@ int main(int argc, char *argv[])
 
         sz += rsz;
 
-        while (find_nal_unit(p, sz, &nal_start, &nal_end) > 0)
+        int nal_size = 0;
+        do
         {
+            nal_size = find_nal_unit(p, sz, &nal_start, &nal_end);
+
             if ( opt_verbose > 0 )
             {
                fprintf( h264_dbgfile, "!! Found NAL at offset %lld (0x%04llX), size %lld (0x%04llX) \n",
@@ -168,10 +187,68 @@ int main(int argc, char *argv[])
 
                 debug_nal(h, h->nal);
             }
+            if ( print_poc_sizes > 0 )
+            {
+              if (h->nal->nal_unit_type == NAL_UNIT_TYPE_CODED_SLICE_IDR ||
+                  h->nal->nal_unit_type == NAL_UNIT_TYPE_CODED_SLICE_NON_IDR)
+              {
+                slice_header_t* sh = h->sh;
+                
+                assert(h->sps->pic_order_cnt_type == 0);
+
+                // Calculate PicOrderCntMsb
+                int PicOrderCntMsb;
+                if (h->nal->nal_unit_type == NAL_UNIT_TYPE_CODED_SLICE_IDR)
+                  PicOrderCntMsb = 0;
+                else
+                {
+                  int MaxPicOrderCntLsb = 1 << (h->sps->log2_max_pic_order_cnt_lsb_minus4 + 4);
+                  if ((sh->pic_order_cnt_lsb < prevPicOrderCntLsb) && ((prevPicOrderCntLsb - sh->pic_order_cnt_lsb) >= (MaxPicOrderCntLsb / 2)))
+                    PicOrderCntMsb = prevPicOrderCntMsb + MaxPicOrderCntLsb;
+                  else if ((sh->pic_order_cnt_lsb > prevPicOrderCntLsb) && ((sh->pic_order_cnt_lsb - prevPicOrderCntLsb) > (MaxPicOrderCntLsb / 2)))
+                    PicOrderCntMsb = prevPicOrderCntMsb - MaxPicOrderCntLsb;
+                  else
+                    PicOrderCntMsb = prevPicOrderCntMsb;
+                }
+
+                int current_poc = PicOrderCntMsb + sh->pic_order_cnt_lsb;
+                int last_poc_abs = last_idr_abs_poc + last_poc;
+
+                if (last_poc != current_poc)
+                {
+                  // New POC. Output the data for the last POC.
+                  if (last_poc != -1)
+                    printf("%d: POC %d POC-ABS %d size %d %s\n", frame_count++, last_poc, last_poc_abs, last_poc_size, lastPicIDR == 1 ? "IDR" : "PB");
+                  
+                  // Update the values of the 'last' POC
+                  if (h->nal->nal_unit_type == NAL_UNIT_TYPE_CODED_SLICE_IDR)
+                  {
+                    prevPicOrderCntLsb = 0;
+                    prevPicOrderCntMsb = 0;
+                    if (last_poc == -1)
+                      last_idr_abs_poc = 0;
+                    else
+                      last_idr_abs_poc = last_idr_abs_poc + last_gop_highest_poc + 2;
+                    last_gop_highest_poc = 0;
+                  }
+                  else
+                  {
+                    prevPicOrderCntLsb = sh->pic_order_cnt_lsb;
+                    prevPicOrderCntMsb = PicOrderCntMsb;
+                    if (current_poc > last_gop_highest_poc)
+                      last_gop_highest_poc = current_poc;
+                  }
+                  last_poc = current_poc;
+                  last_poc_size = 0;
+                  lastPicIDR = (h->nal->nal_unit_type == NAL_UNIT_TYPE_CODED_SLICE_IDR) ? 1 : 0;
+                }
+                last_poc_size += (nal_end - nal_start);
+              }
+            }
 
             p += (nal_end - nal_start);
             sz -= nal_end;
-        }
+        } while (nal_size > 0);
 
         // if no NALs found in buffer, discard it
         if (p == buf) 
@@ -189,6 +266,13 @@ int main(int argc, char *argv[])
         memmove(buf, p, sz);
         off += p - buf;
         p = buf;
+    }
+
+    if (print_poc_sizes > 0)
+    {
+      int last_poc_abs = last_idr_abs_poc + last_poc;
+      if (last_poc != -1)
+        printf("%d: POC %d POC-ABS %d size %d %s\n", frame_count++, last_poc, last_poc_abs, last_poc_size, lastPicIDR == 1 ? "IDR" : "PB");
     }
 
     h264_free(h);

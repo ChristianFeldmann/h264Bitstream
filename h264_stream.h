@@ -428,6 +428,7 @@ void debug_sps(sps_t* sps);
 void debug_pps(pps_t* pps);
 void debug_slice_header(slice_header_t* sh);
 void debug_nal(h264_stream_t* h, nal_t* nal);
+void debug_slice_size(h264_stream_t* h, nal_t* nal);
 
 void debug_bytes(uint8_t* buf, int len);
 
